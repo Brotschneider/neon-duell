@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neon-Duell</title>
+<meta name="description" content="Zwei-Spieler-Duell im Browser: WASD gegen Pfeiltasten. Wer zuerst crasht, verliert die Runde.">
+<meta name="theme-color" content="#07080f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2307080f'/%3E%3Cpath d='M6 24V9h9' stroke='%2329e0ff' stroke-width='3.5' fill='none'/%3E%3Cpath d='M26 8v15h-9' stroke='%23ffb020' stroke-width='3.5' fill='none'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #07080f;
+    --panel: rgba(12, 14, 28, .86);
+    --line: #1d2340;
+    --text: #e9ecff;
+    --muted: #8d95bb;
+    --p1: #29e0ff;
+    --p2: #ffb020;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg) radial-gradient(1200px 600px at 50% -10%, #141a3a 0%, transparent 60%) no-repeat;
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* HUD */
+  .hud {
+    width: 100%;
+    max-width: 1200px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px 10px;
+  }
+  .player { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .p1 { color: var(--p1); }
+  .p2 { color: var(--p2); align-items: flex-end; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .name { font-weight: 800; letter-spacing: .03em; font-size: 15px; white-space: nowrap; }
+  .tag {
+    font-size: 11px; color: var(--muted); white-space: nowrap;
+    border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px;
+  }
+  .pips { display: flex; gap: 6px; }
+  .pip {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid currentColor; opacity: .35;
+    transition: opacity .25s, box-shadow .25s, background-color .25s;
+  }
+  .pip.on { background: currentColor; opacity: 1; box-shadow: 0 0 10px currentColor; }
+  .boost {
+    width: clamp(70px, 16vw, 150px); height: 5px; border-radius: 3px;
+    background: var(--line); overflow: hidden;
+  }
+  .boost i {
+    display: block; height: 100%; background: currentColor;
+    transform-origin: left center; box-shadow: 0 0 8px currentColor;
+  }
+  .p2 .boost i { transform-origin: right center; }
+  .boost.low i { opacity: .35; box-shadow: none; }
+  .title {
+    font-weight: 900; letter-spacing: .22em; font-size: 18px; text-align: center; white-space: nowrap;
+    text-shadow: 0 0 12px rgba(120, 140, 255, .5);
+  }
+  .title small {
+    display: block; margin-top: 3px; font-size: 11px; font-weight: 500;
+    letter-spacing: .04em; color: var(--muted); text-shadow: none;
+  }
+
+  /* Spielfeld */
+  .stage {
+    position: relative; flex: 1; min-height: 0; width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 16px;
+  }
+  canvas {
+    display: block; border-radius: 6px;
+    box-shadow: 0 0 0 1px var(--line), 0 24px 70px rgba(0, 0, 0, .65);
+  }
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px; overflow: auto; pointer-events: none;
+  }
+  .overlay[hidden] { display: none; }
+
+  .card {
+    pointer-events: auto;
+    background: var(--panel);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 16px;
+    padding: 28px 32px; width: 100%; max-width: 540px; margin: auto;
+    text-align: center;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
+    animation: pop .25s ease-out;
+  }
+  .card.compact { max-width: 420px; padding: 22px 26px; }
+  .card h1 {
+    font-size: clamp(28px, 5vw, 44px); letter-spacing: .18em; font-weight: 900; margin-bottom: 10px;
+    background: linear-gradient(90deg, var(--p1), #b9c3ff 50%, var(--p2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .card h2 { font-size: clamp(22px, 4vw, 32px); font-weight: 900; margin-bottom: 4px; }
+  .card p { color: var(--muted); line-height: 1.5; font-size: 15px; }
+  .card p b { color: var(--text); }
+  .card .eyebrow { font-size: 12px; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 6px; }
+  .card .hint { font-size: 13px; margin-top: 6px; }
+  .card .tip { font-size: 13px; }
+  .card .note { margin-top: 12px; font-size: 13px; color: #ff9a9a; }
+  .score {
+    font-size: 40px; font-weight: 900; margin: 6px 0 2px;
+    font-variant-numeric: tabular-nums; letter-spacing: .08em;
+  }
+  .score .s1 { color: var(--p1); }
+  .score .s2 { color: var(--p2); }
+  .score .sep { color: var(--muted); }
+
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0 14px; }
+  .ctrl {
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px 10px 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .ctrl b { font-size: 14px; }
+  .c1 b { color: var(--p1); }
+  .c2 b { color: var(--p2); }
+  .keys { display: grid; grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(2, 34px); gap: 4px; }
+  .keys kbd { width: 34px; height: 34px; padding: 0; font-size: 14px; }
+  .keys kbd:nth-child(1) { grid-column: 2; grid-row: 1; }
+  .keys kbd:nth-child(2) { grid-column: 1; grid-row: 2; }
+  .keys kbd:nth-child(3) { grid-column: 2; grid-row: 2; }
+  .keys kbd:nth-child(4) { grid-column: 3; grid-row: 2; }
+  .c1 kbd { border-color: rgba(41, 224, 255, .45); }
+  .c2 kbd { border-color: rgba(255, 176, 32, .45); }
+
+  kbd {
+    font-family: inherit; font-size: 12px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; padding: 1px 6px; border-radius: 6px;
+    border: 1px solid #2c3460; border-bottom-width: 3px;
+    background: #12162c; color: var(--text);
+  }
+  .btn {
+    margin-top: 18px; font: inherit; font-weight: 800; font-size: 15px; letter-spacing: .03em;
+    color: #07080f; background: linear-gradient(90deg, var(--p1), var(--p2));
+    border: 0; border-radius: 10px; padding: 12px 20px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 10px;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  .btn kbd { background: rgba(0, 0, 0, .18); border-color: rgba(0, 0, 0, .3); color: #07080f; }
+
+  .count {
+    font-size: clamp(80px, 16vw, 180px); font-weight: 900; color: #fff;
+    text-shadow: 0 0 30px rgba(140, 160, 255, .9), 0 0 80px rgba(140, 160, 255, .5);
+    animation: pop .4s ease-out;
+  }
+  @keyframes pop { from { transform: scale(1.35); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center;
+    padding: 10px 16px 14px; font-size: 12px; color: var(--muted);
+  }
+  .foot kbd { font-size: 11px; border-bottom-width: 2px; margin-right: 4px; }
+  .foot b { color: var(--text); font-weight: 600; }
+
+  @media (max-width: 640px) {
+    .hud { gap: 8px; }
+    .title { font-size: 14px; letter-spacing: .14em; }
+    .title small, .tag { display: none; }
+    .name { font-size: 13px; }
+    .card { padding: 20px 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card, .count { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <header class="hud">
+    <div class="player p1">
+      <div class="row"><span class="name">Spieler 1</span><span class="tag">WASD</span></div>
+      <div class="pips" id="pips0"></div>
+      <div class="boost" title="Turbo"><i id="boost0"></i></div>
+    </div>
+    <div class="title">NEON-DUELL<small>Erster mit 5 Punkten gewinnt</small></div>
+    <div class="player p2">
+      <div class="row"><span class="tag">Pfeiltasten</span><span class="name">Spieler 2</span></div>
+      <div class="pips" id="pips1"></div>
+      <div class="boost" title="Turbo"><i id="boost1"></i></div>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <canvas id="game" aria-label="Spielfeld"></canvas>
+    <div class="overlay" id="overlay" aria-live="polite"></div>
+  </main>
+
+  <footer class="foot">
+    <span><kbd>Leertaste</kbd>Start</span>
+    <span><kbd>P</kbd>Pause</span>
+    <span><kbd>M</kbd>Ton <b id="soundState">an</b></span>
+    <span>Turbo: Richtungstaste gedrückt halten</span>
+  </footer>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Einstellungen ----------
+  const COLS = 96, ROWS = 60, WIN_SCORE = 5;
+  const BASE_TICK = 55, MIN_TICK = 32, SPEEDUP = 0.7;           // ms pro Schritt, wird mit der Zeit schneller
+  const BOOST_MAX = 100, BOOST_DRAIN = 6, BOOST_REGEN = 0.6, BOOST_RESUME = 30;
+  const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
+  const OPP = { up: 'down', down: 'up', left: 'right', right: 'left' };
+  const reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  const players = [
+    { id: 0, name: 'Spieler 1', color: '#29e0ff', keys: { KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' } },
+    { id: 1, name: 'Spieler 2', color: '#ffb020', keys: { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' } },
+  ];
+  const keyToPlayer = {};
+  for (const p of players) {
+    p.score = 0;
+    p.dirKey = {};
+    for (const [code, dir] of Object.entries(p.keys)) { keyToPlayer[code] = p; p.dirKey[dir] = code; }
+  }
+
+  // ---------- DOM ----------
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), canvas = $('game'), overlay = $('overlay'), soundStateEl = $('soundState');
+  const ctx = canvas.getContext('2d');
+  const trailCv = document.createElement('canvas'), tctx = trailCv.getContext('2d');
+  const bgCv = document.createElement('canvas'), bctx = bgCv.getContext('2d');
+
+  const pipEls = players.map(p => {
+    const box = $('pips' + p.id), arr = [];
+    for (let i = 0; i < WIN_SCORE; i++) {
+      const s = document.createElement('span');
+      s.className = 'pip';
+      box.appendChild(s);
+      arr.push(s);
+    }
+    return arr;
+  });
+  const boostEls = players.map(p => $('boost' + p.id));
+  const boostShown = players.map(() => ({ v: -1, low: null }));
+
+  // ---------- Zustand ----------
+  const grid = new Uint8Array(COLS * ROWS);
+  const held = new Set();
+  let state = 'menu';            // menu | countdown | playing | roundover | matchover
+  let paused = false, focusLost = false;
+  let tickMs = BASE_TICK, acc = 0, roundTime = 0;
+  let countValue = 0, countTimer = 0, goTimer = 0;
+  let roundOverTimer = 0, cardDelay = 0, pendingCard = '';
+  let particles = [], shake = 0;
+  let cell = 8, dpr = 1, W = 0, H = 0;
+
+  // ---------- Ton ----------
+  const Sound = {
+    ctx: null, master: null, muted: false,
+    init() {
+      if (!this.ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        try {
+          this.ctx = new AC();
+          this.master = this.ctx.createGain();
+          this.master.gain.value = 0.5;
+          this.master.connect(this.ctx.destination);
+        } catch (e) { this.ctx = null; return; }
+      }
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+    },
+    tone(freq, dur, opt = {}) {
+      if (!this.ctx || this.muted) return;
+      const { type = 'square', vol = 0.12, slide = 0, delay = 0 } = opt;
+      const t = this.ctx.currentTime + delay;
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(this.master);
+      o.start(t); o.stop(t + dur + 0.05);
+    },
+    noise(dur, vol) {
+      if (!this.ctx || this.muted) return;
+      const c = this.ctx, t = c.currentTime, n = Math.floor(c.sampleRate * dur);
+      const buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2);
+      const src = c.createBufferSource(); src.buffer = buf;
+      const f = c.createBiquadFilter(); f.type = 'lowpass';
+      f.frequency.setValueAtTime(3200, t); f.frequency.exponentialRampToValueAtTime(180, t + dur);
+      const g = c.createGain(); g.gain.value = vol;
+      src.connect(f); f.connect(g); g.connect(this.master);
+      src.start(t);
+    },
+    count() { this.tone(520, 0.12); },
+    go() { this.tone(880, 0.28, { slide: 300 }); },
+    crash() { this.noise(0.6, 0.55); this.tone(170, 0.4, { type: 'sawtooth', slide: -130, vol: 0.1 }); },
+    point() { this.tone(660, 0.1, { delay: 0.25 }); this.tone(990, 0.16, { delay: 0.36 }); },
+    win() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, { delay: 0.3 + i * 0.12, vol: 0.1 })); },
+  };
+  try { Sound.muted = localStorage.getItem('neonduell-muted') === '1'; } catch (e) { /* egal */ }
+  soundStateEl.textContent = Sound.muted ? 'aus' : 'an';
+
+  function toggleMute() {
+    Sound.muted = !Sound.muted;
+    try { localStorage.setItem('neonduell-muted', Sound.muted ? '1' : '0'); } catch (e) { /* egal */ }
+    soundStateEl.textContent = Sound.muted ? 'aus' : 'an';
+  }
+
+  // ---------- Zeichnen ----------
+  const px = v => v * cell + cell / 2;
+
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    const availW = Math.max(100, r.width - 32);
+    const availH = Math.max(100, r.height - 8);
+    cell = Math.max(3, Math.floor(Math.min(availW / COLS, availH / ROWS)));
+    W = COLS * cell;
+    H = ROWS * cell;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    for (const cv of [canvas, trailCv, bgCv]) {
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+    }
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    drawBackground();
+    rebuildTrails();
+  }
+
+  function drawBackground() {
+    bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bctx.fillStyle = '#090b16';
+    bctx.fillRect(0, 0, W, H);
+    const g = bctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
+    g.addColorStop(0, 'rgba(70, 80, 160, 0.14)');
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    bctx.fillStyle = g;
+    bctx.fillRect(0, 0, W, H);
+    bctx.strokeStyle = 'rgba(130, 150, 255, 0.07)';
+    bctx.lineWidth = 1;
+    bctx.beginPath();
+    for (let x = 4; x < COLS; x += 4) { const v = x * cell + 0.5; bctx.moveTo(v, 0); bctx.lineTo(v, H); }
+    for (let y = 4; y < ROWS; y += 4) { const v = y * cell + 0.5; bctx.moveTo(0, v); bctx.lineTo(W, v); }
+    bctx.stroke();
+    bctx.strokeStyle = 'rgba(130, 150, 255, 0.35)';
+    bctx.lineWidth = 2;
+    bctx.strokeRect(1, 1, W - 2, H - 2);
+  }
+
+  function tracePath(c, pts) {
+    c.beginPath();
+    c.moveTo(px(pts[0].x), px(pts[0].y));
+    for (let i = 1; i < pts.length; i++) c.lineTo(px(pts[i].x), px(pts[i].y));
+  }
+  function strokeGlow(c, color, pts) {
+    tracePath(c, pts);
+    c.lineCap = 'square';
+    c.lineJoin = 'miter';
+    c.strokeStyle = color;
+    c.lineWidth = cell * 0.56;
+    c.shadowColor = color;
+    c.shadowBlur = cell * 1.4 * dpr;
+    c.stroke();
+    c.shadowBlur = 0;
+  }
+  function strokeCore(c, pts) {
+    tracePath(c, pts);
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    c.strokeStyle = 'rgba(255, 255, 255, 0.62)';
+    c.lineWidth = Math.max(1, cell * 0.16);
+    c.stroke();
+  }
+  function rebuildTrails() {
+    tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    tctx.clearRect(0, 0, W, H);
+    for (const p of players) {
+      if (p.path && p.path.length > 1) { strokeGlow(tctx, p.color, p.path); strokeCore(tctx, p.path); }
+    }
+  }
+  function drawStep(p) {
+    const n = p.path.length;
+    strokeGlow(tctx, p.color, p.path.slice(n - 2));
+    strokeCore(tctx, p.path.slice(Math.max(0, n - 3)));
+  }
+
+  function drawHead(p, now) {
+    const x = px(p.x), y = px(p.y);
+    const s = cell * (p.boosting ? 1.3 : 1.05);
+    ctx.save();
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = cell * (p.boosting ? 3 : 2) * dpr;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(x - s / 2, y - s / 2, s, s);
+    ctx.shadowBlur = 0;
+    const c = s * 0.45;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x - c / 2, y - c / 2, c, c);
+    if (state === 'countdown' || state === 'menu') {
+      // Pfeil zeigt die Startrichtung
+      const d = DIRS[p.dir];
+      const off = cell * (2.4 + Math.sin(now / 160) * 0.35);
+      ctx.translate(x + d.x * off, y + d.y * off);
+      ctx.rotate(Math.atan2(d.y, d.x));
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.moveTo(cell * 0.8, 0);
+      ctx.lineTo(-cell * 0.5, cell * 0.7);
+      ctx.lineTo(-cell * 0.5, -cell * 0.7);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function explode(p) {
+    for (let i = 0; i < 56; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 3 + Math.random() * 24, life = 0.45 + Math.random() * 0.8;
+      particles.push({
+        x: p.x + 0.5, y: p.y + 0.5,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life, max: life,
+        color: Math.random() < 0.3 ? '#ffffff' : p.color,
+      });
+    }
+  }
+  function updateParticles(dt) {
+    if (particles.length) {
+      const drag = Math.pow(0.06, dt);
+      for (const q of particles) {
+        q.x += q.vx * dt; q.y += q.vy * dt;
+        q.vx *= drag; q.vy *= drag;
+        q.life -= dt;
+      }
+      particles = particles.filter(q => q.life > 0);
+    }
+    shake *= Math.pow(0.002, dt);
+  }
+  function drawParticles() {
+    if (!particles.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const q of particles) {
+      const a = q.life / q.max, s = cell * (0.2 + 0.5 * a);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = q.color;
+      ctx.fillRect(q.x * cell - s / 2, q.y * cell - s / 2, s, s);
+    }
+    ctx.restore();
+  }
+
+  function render(now) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    if (shake > 0.2) ctx.translate((Math.random() * 2 - 1) * shake, (Math.random() * 2 - 1) * shake);
+    ctx.drawImage(bgCv, 0, 0, W, H);
+    ctx.drawImage(trailCv, 0, 0, W, H);
+    for (const p of players) if (p.alive) drawHead(p, now);
+    drawParticles();
+    ctx.restore();
+  }
+
+  // ---------- HUD & Overlay ----------
+  function updatePips() {
+    players.forEach((p, i) => pipEls[i].forEach((el, k) => el.classList.toggle('on', k < p.score)));
+  }
+  function updateBoostBars() {
+    players.forEach((p, i) => {
+      const v = Math.round((p.boost == null ? BOOST_MAX : p.boost) / BOOST_MAX * 200) / 200;
+      const low = !!p.exhausted, shown = boostShown[i];
+      if (v !== shown.v) { boostEls[i].style.transform = 'scaleX(' + v + ')'; shown.v = v; }
+      if (low !== shown.low) { boostEls[i].parentElement.classList.toggle('low', low); shown.low = low; }
+    });
+  }
+
+  const scoreLine = () =>
+    `<div class="score"><span class="s1">${players[0].score}</span><span class="sep"> : </span><span class="s2">${players[1].score}</span></div>`;
+
+  function menuHtml() {
+    const touchOnly = !!(window.matchMedia && matchMedia('(hover: none) and (pointer: coarse)').matches);
+    return `<div class="card">
+      <h1>NEON-DUELL</h1>
+      <p>Ihr zieht Lichtspuren durch die Arena. Wer gegen eine Wand oder eine Spur fährt, verliert die Runde. Wer zuerst ${WIN_SCORE} Punkte hat, gewinnt.</p>
+      <div class="controls">
+        <div class="ctrl c1"><b>Spieler 1</b><div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div></div>
+        <div class="ctrl c2"><b>Spieler 2</b><div class="keys"><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></div></div>
+      </div>
+      <p class="tip"><b>Turbo:</b> Taste in Fahrtrichtung gedrückt halten. Die Leiste oben zeigt, wie viel noch übrig ist.</p>
+      ${touchOnly ? '<p class="note">Dieses Spiel braucht eine Tastatur.</p>' : ''}
+      <button class="btn" data-action="confirm">Spiel starten <kbd>Leertaste</kbd></button>
+    </div>`;
+  }
+  function roundOverHtml(w) {
+    const head = w
+      ? `<h2 style="color:${w.color}">${w.name} holt den Punkt</h2>`
+      : `<h2>Unentschieden</h2><p>Beide gecrasht, kein Punkt.</p>`;
+    return `<div class="card compact">${head}${scoreLine()}<p class="hint">Nächste Runde startet gleich … <kbd>Leertaste</kbd> überspringt</p></div>`;
+  }
+  function matchOverHtml(w) {
+    return `<div class="card">
+      <p class="eyebrow">Spiel vorbei</p>
+      <h2 style="color:${w.color}">${w.name} gewinnt!</h2>
+      ${scoreLine()}
+      <button class="btn" data-action="confirm">Revanche <kbd>Leertaste</kbd></button>
+    </div>`;
+  }
+  const pauseHtml = () =>
+    `<div class="card compact"><h2>Pause</h2><p>Weiter mit <kbd>Leertaste</kbd> oder <kbd>P</kbd></p></div>`;
+
+  function showCard(html) { overlay.innerHTML = html; overlay.hidden = false; }
+  function showCount(t) { overlay.innerHTML = `<div class="count">${t}</div>`; overlay.hidden = false; }
+  function hideOverlay() { overlay.hidden = true; overlay.innerHTML = ''; }
+
+  // ---------- Spielablauf ----------
+  function placePlayer(p, x, y, dir) {
+    Object.assign(p, {
+      x, y, dir, queue: [], alive: true,
+      boost: BOOST_MAX, boosting: false, exhausted: false, steps: 1,
+      path: [{ x, y }],
+    });
+    grid[y * COLS + x] = p.id + 1;
+  }
+  function resetRound() {
+    grid.fill(0);
+    const y = Math.floor(ROWS / 2), off = Math.floor(COLS * 0.2);
+    placePlayer(players[0], off, y, 'right');
+    placePlayer(players[1], COLS - 1 - off, y, 'left');
+    tickMs = BASE_TICK; acc = 0; roundTime = 0;
+    particles = [];
+    rebuildTrails();
+  }
+  function startMatch() {
+    for (const p of players) p.score = 0;
+    updatePips();
+    startCountdown();
+  }
+  function startCountdown() {
+    resetRound();
+    state = 'countdown';
+    countValue = 3; countTimer = 0; cardDelay = 0;
+    showCount('3');
+    Sound.count();
+  }
+  function endRound(winner) {
+    Sound.crash();
+    if (!reduceMotion) shake = Math.max(4, cell * 0.9);
+    if (winner) winner.score++;
+    updatePips();
+    cardDelay = 0.5;
+    if (winner && winner.score >= WIN_SCORE) {
+      state = 'matchover';
+      pendingCard = matchOverHtml(winner);
+      Sound.win();
+    } else {
+      state = 'roundover';
+      roundOverTimer = 2.6;
+      pendingCard = roundOverHtml(winner);
+      if (winner) Sound.point();
+    }
+    hideOverlay();
+  }
+
+  function steer(p, dir) {
+    if (state === 'countdown') { p.dir = dir; p.queue.length = 0; return; }
+    if (state !== 'playing' || !p.alive) return;
+    const last = p.queue.length ? p.queue[p.queue.length - 1] : p.dir;
+    if (dir === last || dir === OPP[last]) return;
+    if (p.queue.length < 3) p.queue.push(dir);
+  }
+
+  function tick() {
+    roundTime += tickMs / 1000;
+
+    for (const p of players) {
+      if (p.queue.length) {
+        const d = p.queue.shift();
+        if (d !== OPP[p.dir]) p.dir = d;
+      }
+      const wants = held.has(p.dirKey[p.dir]);
+      if (p.exhausted && p.boost >= BOOST_RESUME) p.exhausted = false;
+      p.boosting = wants && !p.exhausted && p.boost >= BOOST_DRAIN;
+      if (p.boosting) {
+        p.boost -= BOOST_DRAIN;
+        if (p.boost < BOOST_DRAIN) p.exhausted = true;
+      } else {
+        p.boost = Math.min(BOOST_MAX, p.boost + BOOST_REGEN);
+      }
+      p.steps = p.boosting ? 2 : 1;
+    }
+
+    // Mit Turbo fährt man zwei Felder pro Schritt; jedes Feld wird einzeln geprüft.
+    const maxSteps = Math.max(players[0].steps, players[1].steps);
+    for (let s = 0; s < maxSteps; s++) {
+      const movers = players.filter(p => p.alive && p.steps > s);
+      for (const p of movers) {
+        const d = DIRS[p.dir];
+        p.nx = p.x + d.x;
+        p.ny = p.y + d.y;
+        p.crash = p.nx < 0 || p.ny < 0 || p.nx >= COLS || p.ny >= ROWS || grid[p.ny * COLS + p.nx] !== 0;
+      }
+      if (movers.length === 2 && movers[0].nx === movers[1].nx && movers[0].ny === movers[1].ny) {
+        movers[0].crash = movers[1].crash = true;
+      }
+      for (const p of movers) {
+        if (p.crash) {
+          p.alive = false;
+          p.boosting = false;
+          explode(p);
+        } else {
+          p.x = p.nx; p.y = p.ny;
+          grid[p.y * COLS + p.x] = p.id + 1;
+          p.path.push({ x: p.x, y: p.y });
+          drawStep(p);
+        }
+      }
+      if (players.some(p => !p.alive)) break;
+    }
+
+    const alive = players.filter(p => p.alive);
+    if (alive.length < 2) { endRound(alive.length === 1 ? alive[0] : null); return; }
+    tickMs = Math.max(MIN_TICK, BASE_TICK - roundTime * SPEEDUP);
+  }
+
+  function update(dt) {
+    if (state === 'countdown') {
+      countTimer += dt;
+      if (countTimer >= 0.7) {
+        countTimer -= 0.7;
+        countValue--;
+        if (countValue > 0) { showCount(String(countValue)); Sound.count(); }
+        else { state = 'playing'; acc = 0; goTimer = 0.55; showCount('LOS!'); Sound.go(); }
+      }
+    } else if (state === 'playing') {
+      if (goTimer > 0) { goTimer -= dt; if (goTimer <= 0) hideOverlay(); }
+      acc += dt * 1000;
+      let guard = 0;
+      while (acc >= tickMs && state === 'playing' && guard++ < 8) { acc -= tickMs; tick(); }
+    } else if (state === 'roundover' || state === 'matchover') {
+      if (cardDelay > 0) { cardDelay -= dt; if (cardDelay <= 0) showCard(pendingCard); }
+      if (state === 'roundover') { roundOverTimer -= dt; if (roundOverTimer <= 0) startCountdown(); }
+    }
+  }
+
+  function setPaused(v) {
+    if (v === paused) return;
+    if (v && state !== 'countdown' && state !== 'playing') return;
+    paused = v;
+    if (paused) { showCard(pauseHtml()); return; }
+    if (state === 'countdown') showCount(String(countValue));
+    else { goTimer = 0; hideOverlay(); }
+  }
+
+  function onConfirm() {
+    Sound.init();
+    if (paused) { setPaused(false); return; }
+    if (state === 'menu' || state === 'matchover') startMatch();
+    else if (state === 'roundover') startCountdown();
+  }
+
+  // ---------- Eingabe ----------
+  const PREVENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Enter']);
+  addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const code = e.code;
+    if (PREVENT.has(code)) e.preventDefault();
+    held.add(code);
+    if (e.repeat) return;
+    const p = keyToPlayer[code];
+    if (p) { if (!paused) steer(p, p.keys[code]); return; }
+    if (code === 'Space' || code === 'Enter' || code === 'NumpadEnter') onConfirm();
+    else if (code === 'KeyP' || code === 'Escape') setPaused(!paused);
+    else if (code === 'KeyM') toggleMute();
+  });
+  addEventListener('keyup', e => held.delete(e.code));
+  addEventListener('blur', () => { held.clear(); focusLost = true; });
+  addEventListener('focus', () => { focusLost = false; });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { held.clear(); focusLost = true; } });
+  overlay.addEventListener('click', e => {
+    if (e.target.closest('[data-action="confirm"]')) { e.target.closest('button').blur(); onConfirm(); }
+  });
+
+  // ---------- Start ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
+    if (focusLost && (state === 'countdown' || state === 'playing')) { focusLost = false; setPaused(true); }
+    if (!paused) { update(dt); updateParticles(dt); }
+    updateBoostBars();
+    render(now);
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  resetRound();
+  updatePips();
+  showCard(menuHtml());
+  if (window.ResizeObserver) new ResizeObserver(() => resize()).observe(stage);
+  else addEventListener('resize', resize);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
